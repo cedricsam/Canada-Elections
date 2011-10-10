@@ -388,12 +388,18 @@ class fedpolls():
 		if bounds_kml.startswith('<Polygon>'):
 		    bounds_kml = '<MultiGeometry>' + bounds_kml + '</MultiGeometry>'
 		try:
+		    bounds_kml = bounds_kml.replace("</MultiGeometry><MultiGeometry>", "")
 		    bounds_points_kml = bounds_kml.replace("<MultiGeometry>", "<MultiGeometry>" + point_kml)
 		    kmlfile,errors = kmlengine.KmlFile.CreateFromParse(bounds_points_kml)
 		except:
 		    bounds_kml = self.geokml[x]["boundary"][0]
 		    bounds_points_kml = bounds_kml.replace("<MultiGeometry>", "<MultiGeometry>" + point_kml)
 		    kmlfile,errors = kmlengine.KmlFile.CreateFromParse(bounds_points_kml)
+		if "boundarydata" in self.geokml[x]:
+		    for boundarydata in self.geokml[x]['boundarydata']:
+			if 'poll_name' in boundarydata and boundarydata["poll_name"] is not None:
+			    point_text += "<strong>%s</strong><br/>" % boundarydata["poll_name"]
+			    break
 		mg = kmldom.AsMultiGeometry(kmlfile.get_root())
 	    #if point_kml <> None and point_kml.startswith('<Point>'):
 	    else:
