@@ -10,6 +10,8 @@ I provide the data too, even if you can get it elsewhere, except for the convert
 
 You must also create a new column for the geometries called "the_geom_nowater" that is created by intersecting a cartographic version of the federal electoral districts (try googling it, it's on some govt website).
 
+kmlbig.txt are IDs of ridings that must be generated with the water, because the watershores would make the files too big. kmlnormal.txt are the rest.
+
 My personal blog contains information about the project:
 http://smurfmatic.net/blog/
 
