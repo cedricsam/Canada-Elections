@@ -1,0 +1,5 @@
+conservative
+liberal
+ndp
+bloc
+green

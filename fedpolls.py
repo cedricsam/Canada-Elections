@@ -19,7 +19,7 @@ class fedpolls():
     BLANK16 = "http://earth.smurfmatic.net/img/16px.png"
     GCHARTURL = "http://chart.apis.google.com/chart"
     
-    def __init__(self, ely, fednum, nowater=True):
+    def __init__(self, ely, fednum, nowater=True, party=None, turnout=False, tolerance=None):
 	self.ely = ely
 	self.fednum = fednum
 	self.nowater = nowater
@@ -28,6 +28,10 @@ class fedpolls():
     	self.conn = pg.connect('canada', '127.0.0.1', 5432, None, None, 'canada', 'aew2ohVu')
 	self.factory = kmldom.KmlFactory_GetFactory()
 	self.kml = self.factory.CreateElementById(kmldom.Type_kml)
+	self.parties = ["conservative", "liberal", "ndp", "bloc", "green"]
+	self.party = party
+	self.turnout = turnout
+	self.geo_tolerance = tolerance
 
     def DB(self):
 	# polygons
@@ -35,7 +39,7 @@ class fedpolls():
 	    nowater_str = "_nowater"
 	else:
 	    nowater_str = ""
-	sql_args = { "fednum":self.fednum, "ely": self.ely, "nowater": nowater_str }
+	sql_args = { "fednum":self.fednum, "ely": self.ely, "nowater": nowater_str, "tolerance": self.geo_tolerance }
 	# fed riding
 	#resgeofed = self.conn.query("SELECT * FROM fed308_a WHERE fed_num = '%d' " % sql_args).dictresult()
 	sql_riding = "SELECT gid, ed_id, ed_namee, ed_namef, \
@@ -61,11 +65,16 @@ class fedpolls():
 	self.x = resgeofed[0]["x"]
 	self.y = resgeofed[0]["y"]
 	# area
-	resgeo = self.conn.query("SELECT pd.*, ST_AsKML(the_geom%(nowater)s) boundary, ST_AsKML(ST_Centroid(the_geom%(nowater)s)) point FROM pd308_a_%(ely)d pd WHERE pd.fed_num = '%(fednum)d' ORDER BY pd_num, emrp_name " % sql_args).dictresult()
+	if sql_args["tolerance"] is not None:
+	    resgeo = self.conn.query("SELECT pd.*, ST_AsKML(ST_SimplifyPreserveTopology(the_geom%(nowater)s,%(tolerance)s)) boundary, ST_AsKML(ST_Centroid(the_geom%(nowater)s)) point FROM pd308_a_%(ely)d pd WHERE pd.fed_num = '%(fednum)d' ORDER BY pd_num, pd_nbr_sfx " % sql_args).dictresult()
+	else:
+	    resgeo = self.conn.query("SELECT pd.*, ST_AsKML(the_geom%(nowater)s) boundary, ST_AsKML(ST_Centroid(the_geom%(nowater)s)) point FROM pd308_a_%(ely)d pd WHERE pd.fed_num = '%(fednum)d' ORDER BY pd_num, pd_nbr_sfx " % sql_args).dictresult()
 	self.geokml = dict()
 	for x in resgeo:
 	    if 'emrp_name' in x:
 		poll_num = str(x["emrp_name"])
+	    elif "pd_nbr_sfx" in x and int(x["pd_nbr_sfx"]) > 0:
+		poll_num = str(x["pd_num"]) + "-" + str(x["pd_nbr_sfx"])
 	    else:
 		poll_num = str(x["pd_num"])
 	    if poll_num not in self.geokml:
@@ -86,10 +95,12 @@ class fedpolls():
 		self.geokml[poll_num]["boundarydata"] = list()
 	    self.geokml[poll_num]["boundarydata"].append(boundarydata)
 	# point
-	resgeo = self.conn.query("SELECT *, ST_AsKML(the_geom) point FROM pd308_p_%(ely)d WHERE fed_num = %(fednum)d ORDER BY pd_num, emrp_name " % sql_args).dictresult()
+	resgeo = self.conn.query("SELECT *, ST_AsKML(the_geom) point FROM pd308_p_%(ely)d WHERE fed_num = %(fednum)d ORDER BY pd_num, pd_nbr_sfx " % sql_args).dictresult()
 	for x in resgeo:
 	    if 'emrp_name' in x:
 		poll_num = str(x["emrp_name"])
+	    elif "pd_nbr_sfx" in x and int(x["pd_nbr_sfx"]) > 0:
+		poll_num = str(x["pd_num"]) + "-" + str(x["pd_nbr_sfx"])
 	    else:
 		poll_num = str(x["pd_num"])
 	    if poll_num not in self.geokml:
@@ -177,6 +188,7 @@ class fedpolls():
 
     def combineRes(self):
 	self.rescombined = dict()
+	self.rescombinedbyparty = dict()
 	for pd_num in self.res: # each poll in the riding
 	    for key in self.res[pd_num]: # each sub-poll (A,B,C,etc.) in a polling div
 		combined_res = dict()
@@ -225,6 +237,7 @@ class fedpolls():
 		combined_list = combined_res.values()
 		combined_list.sort(key = lambda foo:(foo['votes_nb']), reverse = True)
 		self.rescombined[str(pd_num)] = combined_list
+		self.rescombinedbyparty[str(pd_num)] = combined_res
 	
     def genPollStyle(self, id, style_state):
 	kmlid = "poll-" + str(id) 
@@ -236,6 +249,7 @@ class fedpolls():
 	if id not in self.rescombined:
 	    return style
 	res = self.rescombined[id]
+	resbyparty = self.rescombinedbyparty[id]
 	# Set styles
 	iconStyle = style.get_iconstyle()
 	labelStyle = style.get_labelstyle()
@@ -265,16 +279,41 @@ class fedpolls():
 	    '''
 	#pos = sorted(res, key=lambda k: -k["votes_nb"])
 	if allnone:
-	    firstcolor = 0xffcccccc
+	    polycolor = 0xffcccccc
+	    iconcolor = polycolor
 	else:
-	    firstcolor = kmlcedric.partyColor(res[0]["party_name"])
-	    if res[0]["electors_nb"] > 0:
-		margin = 1.0 * (res[0]["votes_nb"] - res[1]["votes_nb"]) / res[0]["electors_nb"]
-		alpha = int(round(margin ** 0.25 * 256)) * 0x1000000
-		firstcolor += alpha
+	    margin = 0.0
+	    alpha = 1
+	    if self.turnout:
+		polycolor = 0x000000
+		rejected_nb = res[0]["rejected_nb"]
+		electors_nb = res[0]["electors_nb"]
+		votesTotal = 0
+		for x in res:
+		    votesTotal += x["votes_nb"]
+		if votesTotal + rejected_nb == 0 or electors_nb == 0:
+		    polycolor = 0xffffffff
+		    iconcolor = polycolor
+		else:
+		    votes256 = int(round((votesTotal + rejected_nb) * 256.0 / electors_nb))
+		    alpha = votes256 * 0x1000000
+		    polycolor += alpha
+		    iconcolor = (256 - votes256) * 0x10000 + (256 - votes256) * 0x100 + (256 - votes256) * 0x1
+	    elif self.party is not None:
+		thisPartyName = kmlcedric.getPartyNameByCommonPartyName(self.party, self.ely)
+		polycolor = kmlcedric.partyColor(self.party)
+		thisPartyRes = resbyparty[thisPartyName]
+	    	alpha = int(round(thisPartyRes["votes_prop"] ** 0.5 * 256)) * 0x1000000
+    		polycolor += alpha
+		iconcolor = polycolor
 	    else:
-		margin = 0.0
-		alpha = 1
+		# default case: color of winning party + margin of victory
+		polycolor = kmlcedric.partyColor(res[0]["party_name"])
+		if res[0]["electors_nb"] > 0:
+		    margin = 1.0 * (res[0]["votes_nb"] - res[1]["votes_nb"]) / res[0]["electors_nb"]
+		    alpha = int(round(margin ** 0.25 * 256)) * 0x1000000
+		    polycolor += alpha
+		iconcolor = polycolor
 	if "boundary" in self.geokml[id]:
 	    if style_state == kmldom.STYLESTATE_HIGHLIGHT:
 		lineStyle.set_width(2)
@@ -286,19 +325,19 @@ class fedpolls():
 		iconStyle.set_icon(icon)
 	    elif style_state == kmldom.STYLESTATE_NORMAL:
 		try:
-		    polyStyle.set_color(kmlbase.Color32(firstcolor))
+		    polyStyle.set_color(kmlbase.Color32(polycolor))
 		except NotImplementedError:
 		    polyStyle.set_color(kmlbase.Color32(0xffffffff))
 		polyStyle.set_colormode(kmldom.COLORMODE_NORMAL)
 		labelStyle.set_scale(0.5)
-		icon_color = kmlcedric.getHtmlHexFromGEHex(firstcolor, False)
+		icon_color = kmlcedric.getHtmlHexFromGEHex(iconcolor, False)
 		iconStyle.set_scale(0)
 		icon = self.factory.CreateIconStyleIcon()
 		icon.set_href(self.BLANK16)
 		iconStyle.set_icon(icon)
 	else:# type(self.geokml[x]["point"]) is types.ListType: # Point polls
     	    iconStyle.set_scale(0.5)
-	    icon_color = kmlcedric.getHtmlHexFromGEHex(firstcolor, False)
+	    icon_color = kmlcedric.getHtmlHexFromGEHex(iconcolor, False)
 	    icon = self.factory.CreateIconStyleIcon()
 	    icon_href = self.GCHARTURL + "?chst=d_map_pin_letter&chld=|" + icon_color + "|000000"
     	    icon.set_href(icon_href)
@@ -487,6 +526,9 @@ if __name__ == '__main__':
     water = False
     year = 2011
     feduid = sys.argv[1]
+    party = None
+    turnout = False
+    tolerance = None
     try:
 	feduid = int(feduid)
     except:
@@ -497,10 +539,22 @@ if __name__ == '__main__':
 	    water = True
 	if sys.argv[i] == "-el":
 	    year = int(sys.argv[i+1])
+	if sys.argv[i] == "-p":
+	    party = sys.argv[i+1]
+	if sys.argv[i] == "-tol":
+	    tolerance = sys.argv[i+1]
+	if sys.argv[i] == "-tn":
+	    turnout = True
     if water:    
-	can = fedpolls(year, feduid, nowater=False)
+	if party is not None:
+	    can = fedpolls(year, feduid, nowater=False, tolerance=tolerance, turnout=turnout, party=party)
+	else:
+	    can = fedpolls(year, feduid, nowater=False, tolerance=tolerance, turnout=turnout)
     else:
-	can = fedpolls(year, feduid)
+	if party is not None:
+	    can = fedpolls(year, feduid, tolerance=tolerance, turnout=turnout, party=party)
+	else:
+	    can = fedpolls(year, feduid, tolerance=tolerance, turnout=turnout)
     can.DB()
     can.genKml()
     #sys.exit()

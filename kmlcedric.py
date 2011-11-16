@@ -50,15 +50,15 @@ def get_gradient_color(colorA, colorB, val):
     return color
 
 def partyColor(partyName):
-    if partyName == 'Liberal':
+    if partyName == 'Liberal' or partyName.startswith("liberal"):
 	color = 0x0000ff
-    elif partyName == 'Conservative':
+    elif partyName == 'Conservative' or partyName.startswith("conservative"):
 	color = 0xff0000
-    elif partyName == 'NDP-New Democratic Party' or partyName == 'N.D.P.':
+    elif partyName == 'NDP-New Democratic Party' or partyName == 'N.D.P.' or partyName.startswith("ndp"):
 	color = 0x008cff
-    elif partyName == 'Bloc Québécois':
+    elif partyName == 'Bloc Québécois' or partyName.startswith("bloc"):
 	color = 0x808000
-    elif partyName == 'Green Party':
+    elif partyName == 'Green Party' or partyName.startswith("green"):
 	color = 0x006400
     else:
 	color = 0xffffff
@@ -93,6 +93,39 @@ def getPartyNameById(partyId):
     else:
 	partyName = None
     return partyName
+
+def getPartyNameByCommonPartyName(commonPartyName, year=None, lang="en"):
+    commonPartyName = commonPartyName.lower()
+    if commonPartyName == 'liberal':
+	partyName = 'Liberal'
+    elif commonPartyName == 'conservative':
+	partyName = 'Conservative'
+    elif commonPartyName == 'ndp':
+	partyName = 'NDP-New Democratic Party'
+	if year is not None and year == 2006:
+	    partyName = 'N.D.P.'
+    elif commonPartyName == 'bloc':
+	partyName = 'Bloc Québécois'
+    elif commonPartyName == 'green':
+	partyName = 'Green Party'
+    else:
+	partyName = None
+    return partyName
+
+def getPartyIdByName(partyName):
+    if partyName == 'Liberal':
+	partyId = 2
+    elif partyName == 'Conservative':
+	partyId = 3
+    elif partyName == 'NDP-New Democratic Party' or partyName == 'N.D.P.':
+	partyId = 4
+    elif partyName == 'Bloc Québécois':
+	partyId = 5
+    elif partyName == 'Green Party':
+	partyId = 6
+    else:
+	partyId = 0
+    return partyId
 
 def getHtmlHexFromGEHex(GEHex, hashmark=True):
     if GEHex > 0x1000000:
